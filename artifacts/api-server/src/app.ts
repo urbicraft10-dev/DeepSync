@@ -6,6 +6,13 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-custom-header'], // Explicitly allow your headers
+  credentials: true,  
+  optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
+}));
+
 app.use(
   pinoHttp({
     logger,
@@ -25,12 +32,7 @@ app.use(
     },
   }),
 );
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL,
-    credentials: true,
-  }),
-);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
