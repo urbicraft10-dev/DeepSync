@@ -5,6 +5,8 @@ import {
   ScatterChart, Scatter, ResponsiveContainer, ReferenceLine
 } from "recharts";
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 function getStabilityCurve() {
   const points = [];
   for (let i = 0; i <= 100; i++) {
@@ -69,7 +71,7 @@ export default function Dashboard({ deviceId, projectId }: Props) {
     lastAlertRef.current = now;
 
     try {
-      await fetch("/api/alerts/notify", {
+      await fetch(`${API_URL}/api/alerts/notify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

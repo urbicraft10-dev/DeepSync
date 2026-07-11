@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 interface CurrentUser { id: number; email: string; role: string; }
 interface Props { projectId: string; currentUser: CurrentUser; }
 type TestStatus = "idle" | "sending" | "ok" | "error";
 
 async function saveContactsToDb(userId: number, userRole: string, alertEmail: string, alertPhone: string) {
-  await fetch(`/api/users/${userId}/contacts`, {
+  await fetch(`${API_URL}/api/users/${userId}/contacts`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", "x-user-id": String(userId), "x-user-role": userRole },
     body: JSON.stringify({ alertEmail: alertEmail || null, alertPhone: alertPhone || null }),
@@ -65,7 +67,7 @@ export default function SettingsPanel({ projectId, currentUser }: Props) {
     if (!myEmail || !myEmail.includes("@")) { setEmailMsg("أدخل بريداً صحيحاً أولاً"); setEmailStatus("error"); return; }
     setEmailStatus("sending"); setEmailMsg("");
     try {
-      const res = await fetch("/api/alerts/test-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: myEmail }) });
+      const res = await fetch(`${API_URL}/api/alerts/test-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: myEmail }) });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (res.ok && data.ok) { setEmailStatus("ok"); setEmailMsg(`✅ أُرسل إلى ${myEmail}`); }
       else { setEmailStatus("error"); setEmailMsg(`❌ ${data.error || "فشل"}`); }
@@ -77,7 +79,7 @@ export default function SettingsPanel({ projectId, currentUser }: Props) {
     if (!myPhone || !myPhone.startsWith("+")) { setSmsMsg("الرقم يجب أن يبدأ بـ + مثال: +213555001122"); setSmsStatus("error"); return; }
     setSmsStatus("sending"); setSmsMsg("");
     try {
-      const res = await fetch("/api/alerts/test-sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: myPhone }) });
+      const res = await fetch(`${API_URL}/api/alerts/test-sms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: myPhone }) });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (res.ok && data.ok) { setSmsStatus("ok"); setSmsMsg(`✅ SMS أُرسل إلى ${myPhone}`); }
       else { setSmsStatus("error"); setSmsMsg(`❌ ${data.error || "فشل"}`); }

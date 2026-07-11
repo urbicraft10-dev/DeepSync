@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 interface AppUser {
   id: number; fullName: string; email: string; role: string;
   companyName: string; language: string; maxProjects: number;
@@ -35,7 +37,7 @@ export default function UsersPanel({ currentUser }: Props) {
   const loadUsers = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch("/api/users", { headers });
+      const res = await fetch(`${API_URL}/api/users`, { headers });
       const data = await res.json() as { ok?: boolean; users?: AppUser[]; error?: string };
       if (data.ok) setUsers(data.users || []);
       else setError(data.error || "Erreur");
@@ -58,7 +60,7 @@ export default function UsersPanel({ currentUser }: Props) {
     }
     setSaving(true); setSaveMsg("");
     try {
-      const url = editUser ? `/api/users/${editUser.id}` : "/api/users";
+      const url = editUser ? `${API_URL}/api/users/${editUser.id}` : `${API_URL}/api/users`;
       const method = editUser ? "PUT" : "POST";
       const body = editUser
         ? { fullName: form.fullName, email: form.email, role: form.role, companyName: form.companyName, language: form.language, maxProjects: form.maxProjects, projectId: form.projectId, ...(form.password ? { password: form.password } : {}) }
@@ -78,7 +80,7 @@ export default function UsersPanel({ currentUser }: Props) {
     if (!window.confirm("حذف هذا المستخدم نهائياً؟")) return;
     setDeleteId(id);
     try {
-      const res = await fetch(`/api/users/${id}`, { method: "DELETE", headers });
+      const res = await fetch(`${API_URL}/api/users/${id}`, { method: "DELETE", headers });
       const data = await res.json() as { ok?: boolean; error?: string };
       if (data.ok) await loadUsers();
     } catch {}
@@ -86,7 +88,7 @@ export default function UsersPanel({ currentUser }: Props) {
   };
 
   const toggleActive = async (u: AppUser) => {
-    await fetch(`/api/users/${u.id}`, { method: "PUT", headers, body: JSON.stringify({ isActive: !u.isActive }) });
+    await fetch(`${API_URL}/api/users/${u.id}`, { method: "PUT", headers, body: JSON.stringify({ isActive: !u.isActive }) });
     await loadUsers();
   };
 
