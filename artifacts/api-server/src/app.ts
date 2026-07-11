@@ -7,8 +7,7 @@ import { logger } from "./lib/logger";
 const app: Express = express();
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-custom-header'], // Explicitly allow your headers
+  origin: "https://workspacedeepsync-production.up.railway.app",
   credentials: true,  
   optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 }));
