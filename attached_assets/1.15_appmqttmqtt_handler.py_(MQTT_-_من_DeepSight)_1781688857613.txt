@@ -1,0 +1,157 @@
+"""
+MQTT Handler - Réception et envoi des données MQTT
+"""
+import json
+import logging
+import threading
+import time
+from typing import Callable, Optional, Dict
+
+import paho.mqtt.client as mqtt
+
+from app.core.config import settings
+from app.core.database import get_influx_client, device_bucket
+from app.models.measurement import SensorReading
+from app.services.calculation import analyser
+from app.services.alert_service import dispatch
+from app.models.alert import AlertConfig
+
+logger = logging.getLogger(__name__)
+
+class MQTTHandler:
+    def __init__(self):
+        self.client = mqtt.Client()
+        self.client.username_pw_set(settings.MQTT_USER, settings.MQTT_PASSWORD)
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+        self._connected = False
+        self._handlers: Dict[str, Callable] = {}
+    
+    def start(self):
+        """Démarrer le client MQTT"""
+        try:
+            self.client.connect(settings.MQTT_HOST, settings.MQTT_PORT, 60)
+            self.client.loop_forever()
+        except Exception as e:
+            logger.error(f"MQTT connection error: {e}")
+            time.sleep(5)
+            self.start()
+    
+    def _on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            logger.info("✅ MQTT connected successfully")
+            self._connected = True
+            # S'abonner aux topics
+            self.client.subscribe("deepsync/+/data")
+            self.client.subscribe("deepsync/+/alarms")
+            self.client.subscribe("deepsync/+/config")
+        else:
+            logger.error(f"❌ MQTT connection failed with code {rc}")
+            self._connected = False
+    
+    def _on_message(self, client, userdata, msg):
+        """Traiter les messages MQTT reçus"""
+        try:
+            payload = json.loads(msg.payload.decode())
+            topic = msg.topic
+            
+            logger.info(f"📨 MQTT received: {topic}")
+            
+            # Extraire device_id du topic
+            parts = topic.split('/')
+            if len(parts) >= 3:
+                device_id = parts[1]
+                msg_type = parts[2] if len(parts) > 2 else "data"
+                
+                if msg_type == "data":
+                    self._handle_sensor_data(device_id, payload)
+                elif msg_type == "alarms":
+                    self._handle_alarm(device_id, payload)
+                elif msg_type == "config":
+                    self._handle_config(device_id, payload)
+                    
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON payload: {e}")
+        except Exception as e:
+            logger.error(f"MQTT message error: {e}")
+    
+    def _handle_sensor_data(self, device_id: str, data: dict):
+        """Traiter les données des capteurs"""
+        try:
+            # Créer une lecture
+            reading = SensorReading(
+                project_id=data.get("project_id", "default"),
+                sensor_id=device_id,
+                sensor_type=data.get("sensor_type", "unknown"),
+                value=float(data.get("s1_mm", 0)),
+                raw_value=float(data.get("raw_value", 0)),
+                unit=data.get("unit", "mm"),
+                sh_mm=float(data.get("sh_mm", 0)),
+                piezo_kPa=float(data.get("piezo_kPa", 0)),
+                ratio_ds=float(data.get("ratio_ds", 0)),
+                s_curve=float(data.get("s_curve", 0)),
+                u_percent=float(data.get("u_percent", 0)),
+                protocol="mqtt",
+                signal_strength=data.get("rssi"),
+                battery=data.get("battery"),
+                metadata=data.get("metadata", {}),
+            )
+            
+            # Écrire dans InfluxDB
+            bucket = device_bucket(device_id)
+            point = reading.to_influx_point(bucket)
+            
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            async def write():
+                async with get_influx_client() as client:
+                    await client.write_api().write(bucket=bucket, record=point)
+            
+            loop.run_until_complete(write())
+            loop.close()
+            
+            logger.info(f"✅ Data saved for device {device_id}")
+            
+            # Diffuser via WebSocket
+            try:
+                from app.api.websocket import manager
+                import asyncio
+                asyncio.create_task(manager.broadcast_all({
+                    "type": "measurement",
+                    "device_id": device_id,
+                    "data": reading.__dict__,
+                    "timestamp": reading.timestamp.isoformat(),
+                }))
+            except Exception as e:
+                logger.error(f"WebSocket broadcast error: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error handling sensor data: {e}")
+    
+    def _handle_alarm(self, device_id: str, data: dict):
+        """Traiter les alarmes reçues"""
+        logger.info(f"🚨 Alarm received from {device_id}: {data}")
+        # Logique d'alarme supplémentaire ici
+    
+    def _handle_config(self, device_id: str, data: dict):
+        """Traiter les mises à jour de configuration"""
+        logger.info(f"⚙️ Config received for {device_id}: {data}")
+    
+    def publish(self, topic: str, payload: dict, qos: int = 1):
+        """Publier un message MQTT"""
+        if self._connected:
+            self.client.publish(topic, json.dumps(payload), qos=qos)
+            logger.info(f"📤 MQTT published to {topic}")
+        else:
+            logger.warning("MQTT not connected, cannot publish")
+    
+    def subscribe(self, topic: str, qos: int = 1):
+        """S'abonner à un topic"""
+        if self._connected:
+            self.client.subscribe(topic, qos=qos)
+            logger.info(f"📥 MQTT subscribed to {topic}")
+    
+    def is_connected(self) -> bool:
+        return self._connected

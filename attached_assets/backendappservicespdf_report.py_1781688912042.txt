@@ -1,0 +1,4 @@
+# مولد تقارير PDF
+def generate_pdf_report(data):
+    # منطق توليد PDF
+    pass

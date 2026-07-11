@@ -1,0 +1,65 @@
+import enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Float, ForeignKey, JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+
+# ============================================================
+# أنواع الحساسات (من TerraSync + DeepSight)
+# ============================================================
+class SensorKind(str, enum.Enum):
+    # من TerraSync
+    S1 = "S1"  # Tassement vertical
+    S2 = "S2"  # Tassement vertical secondaire
+    Sh = "Sh"  # Déplacement horizontal
+    Pz = "Pz"  # Piézomètre
+    extensometer = "extensometer"
+    rain_gauge = "rain_gauge"
+    tiltmeter = "tiltmeter"
+    
+    # من DeepSight
+    LVDT = "LVDT"
+    ADXL345 = "ADXL345"
+    SCA100T = "SCA100T"
+    VW_Piezometer = "VW_Piezometer"
+
+# ============================================================
+# بروتوكولات الاتصال (من TerraSync + DeepSight)
+# ============================================================
+class SensorProtocol(str, enum.Enum):
+    modbus_tcp = "modbus_tcp"
+    mqtt = "mqtt"
+    http_rest = "http_rest"
+    simulated = "simulated"
+    gprs = "gprs"  # من DeepSight
+    lora = "lora"  # من DeepSight
+
+# ============================================================
+# نموذج الحساس
+# ============================================================
+class Sensor(Base):
+    __tablename__ = "sensors"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    kind = Column(Enum(SensorKind), nullable=False)
+    protocol = Column(Enum(SensorProtocol), default=SensorProtocol.simulated)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    serial_number = Column(String, nullable=True)
+    location_description = Column(String, default="")
+    depth_m = Column(Float, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    is_active = Column(Boolean, default=True)
+    calibration_factor = Column(Float, default=1.0)
+    calibration_offset = Column(Float, default=0.0)
+    connection_config = Column(JSON, default=dict)
+    threshold_warning = Column(Float, nullable=True)
+    threshold_critical = Column(Float, nullable=True)
+    unit = Column(String, default="mm")
+    sf_final = Column(Float, default=200.0)  # من DeepSight
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), nullable=True)
+    
+    project = relationship("Project", back_populates="sensors")

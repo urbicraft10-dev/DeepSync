@@ -1,0 +1,3 @@
+export default function ReportDownloader({ projectId }) {
+    return <div>تحميل التقرير</div>;
+}

@@ -1,0 +1,3 @@
+export default function TranslatePanel() {
+    return <div>لوحة الترجمة</div>;
+}

@@ -1,0 +1,16 @@
+# backend/.env
+DEBUG=False
+SECRET_KEY=your-super-secret-key-min-32-chars
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=deepsync
+POSTGRES_USER=deepsync
+POSTGRES_PASSWORD=deepsync_pass
+INFLUXDB_URL=http://influxdb:8086
+INFLUXDB_TOKEN=deepsync-influx-token
+INFLUXDB_ORG=deepsync
+REDIS_URL=redis://redis:6379/0
+MQTT_HOST=mosquitto
+MQTT_PORT=1883
+MQTT_USER=deepsync
+MQTT_PASSWORD=deepsync_2024

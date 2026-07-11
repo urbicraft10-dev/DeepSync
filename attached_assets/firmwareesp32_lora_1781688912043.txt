@@ -1,0 +1,80 @@
+// ============================================================
+// DeepSync - ESP32 + LoRa (SX1276)
+// ============================================================
+
+#include <LoRa.h>
+#include <Wire.h>
+#include <Adafruit_ADXL345_U.h>
+#include <HX711.h>
+#include <ArduinoJson.h>
+
+// ============================================================
+// BROCHES LORA (SPI)
+// ============================================================
+#define LORA_SS 5
+#define LORA_RST 14
+#define LORA_DIO0 2
+
+// ============================================================
+// CONFIGURATION LORA
+// ============================================================
+const long FREQUENCY = 868E6;  // 868MHz (Europe) ou 915MHz (US)
+const int SF = 12;             // Spreading Factor (7-12)
+const long BW = 125E3;         // Bandwidth (125kHz)
+const int CODING_RATE = 5;     // 4/5
+
+// ============================================================
+// SETUP LORA
+// ============================================================
+void setupLoRa() {
+  SPI.begin(SCK, MISO, MOSI, LORA_SS);
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  
+  if (!LoRa.begin(FREQUENCY)) {
+    Serial.println("[LoRa] ❌ Init failed!");
+    return;
+  }
+  
+  LoRa.setSpreadingFactor(SF);
+  LoRa.setSignalBandwidth(BW);
+  LoRa.setCodingRate4(CODING_RATE);
+  LoRa.setTxPower(20);
+  
+  Serial.println("[LoRa] ✅ Initialized");
+}
+
+// ============================================================
+// ENVOI DES DONNÉES VIA LORA
+// ============================================================
+void sendLoRa(float s1, float sh, float piezo) {
+  StaticJsonDocument<256> doc;
+  doc["device_id"] = DEVICE_ID;
+  doc["s1_mm"] = s1;
+  doc["sh_mm"] = sh;
+  doc["piezo_kPa"] = piezo;
+  doc["timestamp"] = millis();
+  
+  char payload[256];
+  serializeJson(doc, payload);
+  
+  LoRa.beginPacket();
+  LoRa.print(payload);
+  LoRa.endPacket();
+  
+  Serial.println("[LoRa] 📡 Data sent");
+}
+
+// ============================================================
+// RÉCEPTION VIA LORA (Gateway)
+// ============================================================
+void receiveLoRa() {
+  int packetSize = LoRa.parsePacket();
+  if (packetSize) {
+    String received = "";
+    while (LoRa.available()) {
+      received += (char)LoRa.read();
+    }
+    Serial.println("[LoRa] 📨 Received: " + received);
+    // Traiter les données reçues
+  }
+}

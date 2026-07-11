@@ -1,0 +1,19 @@
+# 🚀 DeepSync - Guide de Déploiement
+
+## Prérequis
+- Docker Desktop installé
+- Git installé
+- 8GB RAM minimum
+
+## Installation
+
+1. **Cloner le projet**
+```bash
+git clone <your-repo>
+cd DeepSync-Platform
+
+cp backend/.env.example backend/.env
+# Modifier backend/.env avec vos valeurs
+
+bash
+docker-compose -f docker/docker-compose.yml up -d

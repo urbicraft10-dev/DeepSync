@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 215 25% 15%;
+  --border: 215 15% 88%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 25% 15%;
+  --primary: 213 80% 30%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 210 15% 95%;
+  --muted-foreground: 215 15% 55%;
+  --radius: 0.5rem;
+  --app-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--app-font-sans);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+input, select, textarea, button {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid #2E86DE;
+  outline-offset: 2px;
+}

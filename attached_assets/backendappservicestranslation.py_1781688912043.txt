@@ -1,0 +1,5 @@
+# خدمة الترجمة
+class TranslationService:
+    async def translate(self, text, src, tgt):
+        # منطق الترجمة
+        pass

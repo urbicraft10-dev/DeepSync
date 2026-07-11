@@ -1,0 +1,104 @@
+"""
+WebSocket real-time streaming
+WS /ws/projects/{project_id}
+WS /ws/live
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Dict, Set
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["WebSocket"])
+
+# ============================================================
+# Connection Manager (من TerraSync + DeepSight)
+# ============================================================
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, Set[WebSocket]] = {}
+        self.all_connections: Set[WebSocket] = set()
+    
+    async def connect(self, websocket: WebSocket, project_id: int = None):
+        await websocket.accept()
+        if project_id:
+            self.active_connections.setdefault(project_id, set()).add(websocket)
+        self.all_connections.add(websocket)
+        logger.info(f"WS connected: project={project_id} total={len(self.all_connections)}")
+    
+    def disconnect(self, websocket: WebSocket, project_id: int = None):
+        if project_id and project_id in self.active_connections:
+            self.active_connections[project_id].discard(websocket)
+        self.all_connections.discard(websocket)
+        logger.info(f"WS disconnected: project={project_id}")
+    
+    async def broadcast(self, project_id: int, message: dict):
+        if project_id not in self.active_connections:
+            return
+        dead = set()
+        for ws in list(self.active_connections[project_id]):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.add(ws)
+        self.active_connections[project_id] -= dead
+    
+    async def broadcast_all(self, message: dict):
+        dead = set()
+        for ws in list(self.all_connections):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.add(ws)
+        self.all_connections -= dead
+
+manager = ConnectionManager()
+
+# ============================================================
+# WebSocket Endpoints
+# ============================================================
+@router.websocket("/ws/projects/{project_id}")
+async def project_websocket(websocket: WebSocket, project_id: int):
+    await manager.connect(websocket, project_id)
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "project_id": project_id,
+            "message": "Connected to DeepSync real-time stream",
+        })
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "heartbeat"})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, project_id)
+    except Exception as exc:
+        logger.error(f"WS error project={project_id}: {exc}")
+        manager.disconnect(websocket, project_id)
+
+@router.websocket("/ws/live")
+async def live_websocket(websocket: WebSocket):
+    await manager.connect(websocket, None)
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Connected to DeepSync live stream",
+        })
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "heartbeat"})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, None)
+    except Exception as exc:
+        logger.error(f"WS live error: {exc}")
+        manager.disconnect(websocket, None)

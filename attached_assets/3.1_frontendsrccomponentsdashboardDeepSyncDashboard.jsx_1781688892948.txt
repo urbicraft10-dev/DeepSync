@@ -1,0 +1,448 @@
+// ============================================================
+// DeepSyncDashboard.jsx - Les 3 courbes
+// ============================================================
+import React, { useState, useEffect } from 'react';
+import { Line, Scatter } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+} from 'chart.js';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
+
+export default function DeepSyncDashboard({ deviceId, projectId }) {
+  const [verticalData, setVerticalData] = useState([]);
+  const [horizontalData, setHorizontalData] = useState([]);
+  const [stabilityData, setStabilityData] = useState([]);
+  const [currentPoint, setCurrentPoint] = useState(null);
+  const [status, setStatus] = useState('VERT');
+  const [latestValues, setLatestValues] = useState({
+    s1: 0,
+    sh: 0,
+    ratio: 0,
+    s_curve: 0,
+    u: 0
+  });
+
+  // ============================================================
+  // Courbe de destruction (Matsuo-Kawamura)
+  // ============================================================
+  const getStabilityCurve = () => {
+    const points = [];
+    for (let i = 0; i <= 100; i++) {
+      const ratio = i / 100;
+      const s = 5.93 * Math.exp(1.28 * ratio * ratio - 3.41 * ratio);
+      points.push({ x: ratio, y: Math.round(s * 100) / 100 });
+    }
+    return points;
+  };
+
+  // ============================================================
+  // WebSocket
+  // ============================================================
+  useEffect(() => {
+    const ws = new WebSocket(`ws://localhost:8000/ws/projects/${projectId}`);
+    
+    ws.onopen = () => {
+      console.log('🔌 WebSocket connected');
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const time = new Date().toLocaleTimeString();
+        
+        // Mettre à jour les données
+        setVerticalData(prev => [...prev.slice(-50), { time, s: data.s_measured || 0 }]);
+        setHorizontalData(prev => [...prev.slice(-50), { time, sh: data.sh_mm || 0 }]);
+        setStabilityData(prev => [...prev.slice(-50), { 
+          x: data.ratio || 0, 
+          y: data.s_measured || 0 
+        }]);
+        
+        if (data.s_measured && data.ratio) {
+          setCurrentPoint({ x: data.ratio, y: data.s_measured });
+        }
+        
+        setStatus(data.state || 'VERT');
+        setLatestValues({
+          s1: data.s_measured || 0,
+          sh: data.sh_mm || 0,
+          ratio: data.ratio || 0,
+          s_curve: data.s_ref || 0,
+          u: data.u_percent || 0
+        });
+        
+      } catch (e) {
+        console.error('WebSocket error:', e);
+      }
+    };
+    
+    ws.onclose = () => {
+      console.log('🔌 WebSocket disconnected');
+      setTimeout(() => {
+        // Reconnexion automatique après 5s
+        new WebSocket(`ws://localhost:8000/ws/projects/${projectId}`);
+      }, 5000);
+    };
+    
+    return () => ws.close();
+  }, [projectId]);
+
+  // ============================================================
+  // Couleurs d'état
+  // ============================================================
+  const statusColors = {
+    'safe': '#27AE60',
+    'warning': '#F39C12',
+    'danger': '#E74C3C',
+    'critical': '#C0392B',
+    'VERT': '#27AE60',
+    'JAUNE': '#F39C12',
+    'ORANGE': '#E67E22',
+    'ROUGE': '#E74C3C'
+  };
+
+  const statusLabels = {
+    'safe': '✅ Sûr',
+    'warning': '⚠️ Avertissement',
+    'danger': '🚨 Danger',
+    'critical': '🚨 Critique',
+    'VERT': '✅ Sûr',
+    'JAUNE': '⚠️ Avertissement',
+    'ORANGE': '🔶 Alerte',
+    'ROUGE': '🚨 Danger'
+  };
+
+  // ============================================================
+  // Données des graphiques
+  // ============================================================
+  const verticalChartData = {
+    labels: verticalData.map(d => d.time),
+    datasets: [{
+      label: 'Tassement vertical S(t) [mm]',
+      data: verticalData.map(d => d.s),
+      borderColor: '#2E86DE',
+      backgroundColor: 'rgba(46, 134, 222, 0.1)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 3,
+    }]
+  };
+
+  const horizontalChartData = {
+    labels: horizontalData.map(d => d.time),
+    datasets: [{
+      label: 'Déplacement horizontal Sh(t) [mm]',
+      data: horizontalData.map(d => d.sh),
+      borderColor: '#F39C12',
+      backgroundColor: 'rgba(243, 156, 18, 0.1)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 3,
+    }]
+  };
+
+  const stabilityCurve = getStabilityCurve();
+  const stabilityChartData = {
+    datasets: [
+      {
+        label: 'Courbe de destruction (Matsuo-Kawamura 1977)',
+        data: stabilityCurve,
+        type: 'line',
+        borderColor: '#E74C3C',
+        borderWidth: 3,
+        pointRadius: 0,
+        fill: false,
+        showLine: true,
+      },
+      {
+        label: 'Mesures historiques',
+        data: stabilityData,
+        backgroundColor: 'rgba(52, 152, 219, 0.3)',
+        pointRadius: 4,
+        showLine: false,
+      },
+      ...(currentPoint ? [{
+        label: 'Position actuelle',
+        data: [currentPoint],
+        backgroundColor: statusColors[status],
+        borderColor: '#2C3E50',
+        borderWidth: 2,
+        pointRadius: 14,
+        pointHoverRadius: 18,
+        showLine: false,
+      }] : []),
+    ]
+  };
+
+  const currentColor = statusColors[status] || '#95A5A6';
+  const statusLabel = statusLabels[status] || status;
+
+  // ============================================================
+  // RENDU
+  // ============================================================
+  return (
+    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
+      
+      {/* ============================================================
+      En-tête
+      ============================================================ */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '24px',
+        flexWrap: 'wrap',
+        gap: '12px'
+      }}>
+        <div>
+          <h1 style={{ color: '#1F4E79', fontSize: '28px', margin: 0 }}>
+            🏗️ DeepSync Platform
+          </h1>
+          <p style={{ color: '#7F8C8D', margin: '4px 0 0' }}>
+            Surveillance Géotechnique — {deviceId} | Projet {projectId}
+          </p>
+        </div>
+        <div style={{
+          background: currentColor,
+          color: '#fff',
+          padding: '12px 28px',
+          borderRadius: '30px',
+          fontSize: '20px',
+          fontWeight: 'bold',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          {statusLabel}
+        </div>
+      </div>
+
+      {/* ============================================================
+      Cartes de valeurs
+      ============================================================ */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(5, 1fr)',
+        gap: '12px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#7F8C8D' }}>S (mm)</div>
+          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2E86DE' }}>{latestValues.s1.toFixed(2)}</div>
+        </div>
+        <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#7F8C8D' }}>Sh (mm)</div>
+          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#F39C12' }}>{latestValues.sh.toFixed(2)}</div>
+        </div>
+        <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#7F8C8D' }}>δ/s</div>
+          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#8E44AD' }}>{latestValues.ratio.toFixed(4)}</div>
+        </div>
+        <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#7F8C8D' }}>s_curve (mm)</div>
+          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#E74C3C' }}>{latestValues.s_curve.toFixed(2)}</div>
+        </div>
+        <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#7F8C8D' }}>U (%)</div>
+          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#1ABC9C' }}>{latestValues.u.toFixed(1)}</div>
+        </div>
+      </div>
+
+      {/* ============================================================
+      Courbe 1: Verticale
+      ============================================================ */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '20px',
+        marginBottom: '20px'
+      }}>
+        <div style={{
+          background: '#fff',
+          padding: '20px',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+        }}>
+          <h3 style={{ color: '#2E86DE', marginTop: 0 }}>📉 Tassement Vertical S(t)</h3>
+          <Line
+            data={verticalChartData}
+            options={{
+              responsive: true,
+              plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => `S = ${ctx.parsed.y.toFixed(2)} mm`
+                  }
+                }
+              },
+              scales: {
+                x: { title: { display: true, text: 'Temps' } },
+                y: { title: { display: true, text: 'S (mm)' } }
+              }
+            }}
+          />
+        </div>
+
+        {/* ============================================================
+        Courbe 2: Horizontale
+        ============================================================ */}
+        <div style={{
+          background: '#fff',
+          padding: '20px',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
+        }}>
+          <h3 style={{ color: '#F39C12', marginTop: 0 }}>📊 Déplacement Horizontal Sh(t)</h3>
+          <Line
+            data={horizontalChartData}
+            options={{
+              responsive: true,
+              plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => `Sh = ${ctx.parsed.y.toFixed(2)} mm`
+                  }
+                }
+              },
+              scales: {
+                x: { title: { display: true, text: 'Temps' } },
+                y: { title: { display: true, text: 'Sh (mm)' } }
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* ============================================================
+      Courbe 3: Matsuo-Kawamura (combinée)
+      ============================================================ */}
+      <div style={{
+        background: '#fff',
+        padding: '20px',
+        borderRadius: '12px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        marginBottom: '20px'
+      }}>
+        <h3 style={{ color: '#E74C3C', marginTop: 0 }}>📐 Courbe de Stabilité — Matsuo & Kawamura (1977)</h3>
+        <Scatter
+          data={stabilityChartData}
+          options={{
+            responsive: true,
+            plugins: {
+              legend: { position: 'top' },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const label = ctx.dataset.label || '';
+                    const x = ctx.parsed.x || 0;
+                    const y = ctx.parsed.y || 0;
+                    if (label === 'Courbe de destruction') {
+                      return `δ/s=${x.toFixed(3)}, s=${y.toFixed(2)}mm`;
+                    }
+                    return `δ/s=${x.toFixed(3)}, s=${y.toFixed(2)}mm`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                title: { display: true, text: 'δ/s — Rapport déplacement/tassement' },
+                min: 0,
+                max: 1.0,
+              },
+              y: {
+                title: { display: true, text: 's (mm) — Tassement vertical' },
+                min: 0,
+                max: 20,
+              }
+            }
+          }}
+        />
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: '8px'
+        }}>
+          <p style={{ color: '#888', fontSize: '12px', margin: 0 }}>
+            Équation: s = 5,93 · exp(1,28·(δ/s)² − 3,41·(δ/s))
+          </p>
+          <p style={{ color: '#888', fontSize: '12px', margin: 0 }}>
+            Matsuo & Kawamura (1977) — Soils and Foundations, Vol.17, No.3
+          </p>
+        </div>
+      </div>
+
+      {/* ============================================================
+      Légende des zones
+      ============================================================ */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: '12px'
+      }}>
+        <div style={{
+          background: '#27AE60',
+          color: '#fff',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          textAlign: 'center'
+        }}>
+          🟢 <strong>Safe</strong><br/>
+          <span style={{ fontSize: '12px' }}>s &lt; 0.85 × s_curve</span>
+        </div>
+        <div style={{
+          background: '#F39C12',
+          color: '#fff',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          textAlign: 'center'
+        }}>
+          🟡 <strong>Warning</strong><br/>
+          <span style={{ fontSize: '12px' }}>s &gt; 0.85 × s_curve</span>
+        </div>
+        <div style={{
+          background: '#E67E22',
+          color: '#fff',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          textAlign: 'center'
+        }}>
+          🟠 <strong>Alert</strong><br/>
+          <span style={{ fontSize: '12px' }}>Sh &gt; 20mm ou rate &gt; 5mm/h</span>
+        </div>
+        <div style={{
+          background: '#E74C3C',
+          color: '#fff',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          textAlign: 'center'
+        }}>
+          🔴 <strong>Danger</strong><br/>
+          <span style={{ fontSize: '12px' }}>s &gt; s_curve (2x consécutif)</span>
+        </div>
+      </div>
+    </div>
+  );
+}

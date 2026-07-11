@@ -1,0 +1,112 @@
+from pydantic_settings import BaseSettings
+from typing import List, Optional
+
+class Settings(BaseSettings):
+    # ============================================================
+    # إعدادات عامة
+    # ============================================================
+    APP_NAME: str = "DeepSync"
+    DEBUG: bool = False
+    SECRET_KEY: str = "change-this-in-production-min-32-chars"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24h
+    
+    # ============================================================
+    # الأمان (من TerraSync)
+    # ============================================================
+    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1", "*"]
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:80"]
+    
+    # ============================================================
+    # PostgreSQL (من TerraSync)
+    # ============================================================
+    POSTGRES_HOST: str = "postgres"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "deepsync"
+    POSTGRES_USER: str = "deepsync"
+    POSTGRES_PASSWORD: str = "deepsync_pass"
+    
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+    
+    # ============================================================
+    # InfluxDB (من المشروعين)
+    # ============================================================
+    INFLUXDB_URL: str = "http://influxdb:8086"
+    INFLUXDB_TOKEN: str = "deepsync-influx-token"
+    INFLUXDB_ORG: str = "deepsync"
+    INFLUXDB_BUCKET: str = "measurements"
+    
+    # ============================================================
+    # Redis / Celery (من TerraSync)
+    # ============================================================
+    REDIS_URL: str = "redis://redis:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/2"
+    
+    # ============================================================
+    # MQTT (من DeepSight)
+    # ============================================================
+    MQTT_HOST: str = "mosquitto"
+    MQTT_PORT: int = 1883
+    MQTT_USER: str = "deepsync"
+    MQTT_PASSWORD: str = "deepsync_2024"
+    MQTT_TOPIC: str = "deepsync/+/data"
+    MQTT_ALARM_TOPIC: str = "deepsync/+/alarms"
+    
+    # ============================================================
+    # إنذارات (من المشروعين)
+    # ============================================================
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_FROM: str = ""
+    
+    # مزودي الجزائر (من TerraSync)
+    OOREDOO_API_URL: str = ""
+    OOREDOO_USERNAME: str = ""
+    OOREDOO_PASSWORD: str = ""
+    OOREDOO_SENDER: str = "DeepSync"
+    
+    DJEZZY_API_URL: str = ""
+    DJEZZY_API_KEY: str = ""
+    DJEZZY_SENDER: str = "DeepSync"
+    
+    MOBILIS_API_URL: str = ""
+    MOBILIS_API_KEY: str = ""
+    MOBILIS_SENDER: str = "DeepSync"
+    
+    FCM_SERVER_KEY: str = ""
+    
+    # ============================================================
+    # الترجمة (من TerraSync)
+    # ============================================================
+    LIBRETRANSLATE_URL: str = "http://libretranslate:5000"
+    LIBRETRANSLATE_KEY: str = ""
+    GOOGLE_TRANSLATE_KEY: str = ""
+    
+    # ============================================================
+    # المجدول (من المشروعين)
+    # ============================================================
+    SCHEDULER_INTERVAL: int = 60  # ثانية
+    
+    # ============================================================
+    # معادلة Matsuo-Kawamura (من المشروعين)
+    # ============================================================
+    SF_FINAL_DEFAULT: float = 200.0  # Tassement final prévu (mm)
+    DANGER_RATE_MM_H: float = 5.0    # mm/heure
+    CONSECUTIVE_THRESHOLD: int = 2   # lectures consécutives
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+settings = Settings()

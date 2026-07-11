@@ -1,0 +1,73 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import List, Optional
+
+# ============================================================
+# قراءة حساس (من TerraSync + DeepSight)
+# ============================================================
+@dataclass
+class SensorReading:
+    project_id: str
+    sensor_id: str
+    sensor_type: str
+    value: float
+    raw_value: float
+    unit: str = "mm"
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    signal_strength: Optional[int] = None
+    battery: Optional[float] = None
+    protocol: str = "unknown"
+    quality: float = 1.0
+    metadata: dict = field(default_factory=dict)
+    
+    # من DeepSight
+    sh_mm: Optional[float] = None
+    piezo_kPa: Optional[float] = None
+    ratio_ds: Optional[float] = None
+    s_curve: Optional[float] = None
+    u_percent: Optional[float] = None
+    etat: Optional[str] = None
+    
+    def to_influx_point(self, bucket: str):
+        from influxdb_client import Point
+        return (
+            Point("sensor_reading")
+            .tag("project_id", self.project_id)
+            .tag("sensor_id", self.sensor_id)
+            .tag("sensor_type", self.sensor_type)
+            .tag("unit", self.unit)
+            .tag("protocol", self.protocol)
+            .field("value", self.value)
+            .field("raw_value", self.raw_value)
+            .field("quality", self.quality)
+            .field("signal_strength", self.signal_strength or 0)
+            .field("battery", self.battery or 0.0)
+            .time(self.timestamp)
+        )
+
+# ============================================================
+# نتيجة تحليل الاستقرار (من المشروعين)
+# ============================================================
+@dataclass
+class TerraResult:
+    timestamp: datetime
+    project_id: int
+    sensor_id: int
+    s_measured: float
+    delta: float
+    ratio: float
+    s_ref: float
+    uniformity_degree: float
+    delta_s_per_hour: float
+    state: str  # safe | warning | danger | critical
+    consecutive_danger: int
+    alert_triggered: bool
+    alert_channels: List[str] = field(default_factory=list)
+    message: str = ""
+    
+    # من DeepSight
+    sh_mm: float = 0.0
+    piezo_kPa: float = 0.0
+    u_percent: float = 0.0
+    distance_pct: float = 100.0

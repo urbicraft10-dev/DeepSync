@@ -1,0 +1,337 @@
+// ============================================================
+// DeepSync - Firmware ESP32 v1.0
+// Capteurs: LVDT (HX711) + ADXL345
+// Communication: WiFi + MQTT
+// ============================================================
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <Adafruit_ADXL345_U.h>
+#include <HX711.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+
+// ============================================================
+// CONFIGURATION RÉSEAU
+// ============================================================
+const char* WIFI_SSID = "NOM_WIFI_CHANTIER";
+const char* WIFI_PASS = "MOT_DE_PASSE";
+const char* MQTT_BROKER = "192.168.1.100";
+const int MQTT_PORT = 1883;
+const char* MQTT_USER = "deepsync";
+const char* MQTT_PASS = "deepsync_2024";
+const char* DEVICE_ID = "NODE_01";
+const char* PROJECT_ID = "PROJ_001";
+
+// ============================================================
+// BROCHES
+// ============================================================
+#define HX711_DOUT 2
+#define HX711_SCK 3
+#define ADXL_SDA 21
+#define ADXL_SCL 22
+#define BUZZER_PIN 13
+#define LED_RED 14
+#define LED_GREEN 15
+#define LED_YELLOW 16
+
+// ============================================================
+// PARAMÈTRES
+// ============================================================
+const float SENSOR_CALIB = 2.205;
+const float SENSOR_OFFSET = 0.0;
+const float SF_FINAL = 200.0;
+const float THRESHOLD_SH = 20.0;
+const int READ_INTERVAL = 30000;
+const int SEND_INTERVAL = 60000;
+
+// ============================================================
+// OBJETS
+// ============================================================
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+HX711 scale;
+Preferences prefs;
+
+// ============================================================
+// VARIABLES GLOBALES
+// ============================================================
+float s1_mm = 0.0;
+float sh_mm = 0.0;
+float piezo_kPa = 0.0;
+float ratio_ds = 0.0;
+float u_percent = 0.0;
+float s_curve = 0.0;
+int alarm_count = 0;
+unsigned long lastRead = 0;
+unsigned long lastSend = 0;
+
+struct SensorBuffer {
+  float s1; float sh; float piezo;
+  unsigned long timestamp;
+};
+SensorBuffer offlineBuffer[50];
+int bufferIndex = 0;
+
+// ============================================================
+// SETUP
+// ============================================================
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_YELLOW, OUTPUT);
+  
+  // HX711
+  scale.begin(HX711_DOUT, HX711_SCK);
+  scale.set_scale(SENSOR_CALIB);
+  scale.tare();
+  Serial.println("[HX711] Initialized");
+  
+  // ADXL345
+  Wire.begin(ADXL_SDA, ADXL_SCL);
+  if (!accel.begin()) {
+    Serial.println("[ERROR] ADXL345 not found!");
+    blinkError();
+  }
+  accel.setRange(ADXL345_RANGE_2_G);
+  Serial.println("[ADXL345] Initialized");
+  
+  // WiFi
+  connectWiFi();
+  
+  // MQTT
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(onMqttMessage);
+  connectMQTT();
+  
+  digitalWrite(LED_GREEN, HIGH);
+  Serial.println("[INIT] DeepSync ready");
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+void loop() {
+  unsigned long now = millis();
+  
+  if (!mqttClient.connected()) connectMQTT();
+  mqttClient.loop();
+  
+  if (now - lastRead >= READ_INTERVAL) {
+    lastRead = now;
+    readAllSensors();
+    calculateStability();
+    checkAlarms();
+  }
+  
+  if (now - lastSend >= SEND_INTERVAL) {
+    lastSend = now;
+    if (mqttClient.connected()) {
+      sendMQTT();
+      flushOfflineBuffer();
+    } else {
+      storeOffline();
+    }
+  }
+}
+
+// ============================================================
+// LECTURE DES CAPTEURS
+// ============================================================
+void readAllSensors() {
+  // Lecture S1
+  float raw = scale.get_units(10);
+  s1_mm = raw + SENSOR_OFFSET;
+  if (s1_mm < 0) s1_mm = 0;
+  
+  // Lecture ADXL345
+  sensors_event_t event;
+  accel.getEvent(&event);
+  float angle_rad = atan2(event.acceleration.x, event.acceleration.z);
+  float hauteur_remblai_m = 5.0;
+  sh_mm = sin(angle_rad) * hauteur_remblai_m * 1000.0;
+  if (sh_mm < 0) sh_mm = -sh_mm;
+  
+  // Lecture Piézomètre
+  int piezo_raw = analogRead(34);
+  piezo_kPa = (piezo_raw / 4095.0) * 500.0;
+  
+  Serial.printf("[SENSOR] S1=%.2fmm | Sh=%.2fmm | Piezo=%.1fkPa\n",
+                s1_mm, sh_mm, piezo_kPa);
+}
+
+// ============================================================
+// CALCUL STABILITÉ (Matsuo-Kawamura)
+// ============================================================
+void calculateStability() {
+  if (s1_mm > 0.1) {
+    ratio_ds = sh_mm / s1_mm;
+  } else {
+    ratio_ds = 0.0;
+  }
+  
+  s_curve = 5.93 * exp(1.28 * ratio_ds * ratio_ds - 3.41 * ratio_ds);
+  
+  float sr = SF_FINAL - s1_mm;
+  if (sr < 0) sr = 0;
+  u_percent = ((SF_FINAL - sr) / SF_FINAL) * 100.0;
+  
+  Serial.printf("[CALC] δ/s=%.3f | s_courbe=%.2f | U=%.1f%%\n",
+                ratio_ds, s_curve, u_percent);
+}
+
+// ============================================================
+// ALARMES
+// ============================================================
+void checkAlarms() {
+  bool danger = (s1_mm > s_curve);
+  bool vigilance = (s1_mm > 0.85 * s_curve) || (sh_mm > THRESHOLD_SH);
+  
+  if (danger) {
+    alarm_count++;
+    Serial.println("[ALARME] DANGER!");
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_GREEN, LOW);
+    digitalWrite(LED_YELLOW, LOW);
+    
+    for (int i = 0; i < 3; i++) {
+      tone(BUZZER_PIN, 1000, 200);
+      delay(300);
+    }
+    
+    if (alarm_count >= 2) {
+      sendAlarmMQTT("ROUGE", "Courbe de destruction dépassée");
+    }
+  } else if (vigilance) {
+    alarm_count = 0;
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_YELLOW, HIGH);
+    digitalWrite(LED_GREEN, LOW);
+    tone(BUZZER_PIN, 500, 100);
+    sendAlarmMQTT("JAUNE", "Approche zone critique");
+  } else {
+    alarm_count = 0;
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_YELLOW, LOW);
+    digitalWrite(LED_GREEN, HIGH);
+    noTone(BUZZER_PIN);
+  }
+}
+
+// ============================================================
+// MQTT
+// ============================================================
+void sendMQTT() {
+  StaticJsonDocument<512> doc;
+  doc["device_id"] = DEVICE_ID;
+  doc["project_id"] = PROJECT_ID;
+  doc["s1_mm"] = s1_mm;
+  doc["sh_mm"] = sh_mm;
+  doc["piezo_kPa"] = piezo_kPa;
+  doc["ratio_ds"] = ratio_ds;
+  doc["s_curve"] = s_curve;
+  doc["u_percent"] = u_percent;
+  doc["timestamp"] = millis() / 1000;
+  doc["rssi"] = WiFi.RSSI();
+  
+  char payload[512];
+  serializeJson(doc, payload);
+  
+  String topic = "deepsync/" + String(DEVICE_ID) + "/data";
+  mqttClient.publish(topic.c_str(), payload, true);
+  Serial.println("[MQTT] Data sent: " + String(payload));
+}
+
+void sendAlarmMQTT(String level, String message) {
+  StaticJsonDocument<256> doc;
+  doc["device_id"] = DEVICE_ID;
+  doc["project_id"] = PROJECT_ID;
+  doc["level"] = level;
+  doc["message"] = message;
+  doc["s1_mm"] = s1_mm;
+  doc["sh_mm"] = sh_mm;
+  doc["s_curve"] = s_curve;
+  doc["timestamp"] = millis() / 1000;
+  
+  char payload[256];
+  serializeJson(doc, payload);
+  mqttClient.publish("deepsight/" + String(DEVICE_ID) + "/alarms", payload);
+  Serial.println("[ALARM] Published: " + level);
+}
+
+void connectWiFi() {
+  Serial.print("[WiFi] Connecting to " + String(WIFI_SSID));
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(" OK — IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println(" FAILED — Offline mode");
+  }
+}
+
+void connectMQTT() {
+  while (!mqttClient.connected()) {
+    if (mqttClient.connect(DEVICE_ID, MQTT_USER, MQTT_PASS)) {
+      mqttClient.subscribe("deepsync/" + String(DEVICE_ID) + "/config");
+      Serial.println("[MQTT] Connected");
+    } else {
+      Serial.print("[MQTT] Failed, rc=" + String(mqttClient.state()));
+      delay(5000);
+    }
+  }
+}
+
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  String msg = String((char*)payload, length);
+  StaticJsonDocument<128> doc;
+  deserializeJson(doc, msg);
+  if (doc.containsKey("sf_final")) {
+    Serial.println("[CONFIG] Sf updated: " + String((float)doc["sf_final"]));
+  }
+}
+
+// ============================================================
+// BUFFER OFFLINE
+// ============================================================
+void storeOffline() {
+  if (bufferIndex < 50) {
+    offlineBuffer[bufferIndex++] = { s1_mm, sh_mm, piezo_kPa, millis() };
+    Serial.println("[BUFFER] Stored offline: " + String(bufferIndex) + "/50");
+  }
+}
+
+void flushOfflineBuffer() {
+  for (int i = 0; i < bufferIndex; i++) {
+    StaticJsonDocument<256> doc;
+    doc["device_id"] = DEVICE_ID;
+    doc["project_id"] = PROJECT_ID;
+    doc["s1_mm"] = offlineBuffer[i].s1;
+    doc["sh_mm"] = offlineBuffer[i].sh;
+    doc["piezo_kPa"] = offlineBuffer[i].piezo;
+    doc["timestamp"] = offlineBuffer[i].timestamp;
+    doc["offline"] = true;
+    char payload[256];
+    serializeJson(doc, payload);
+    mqttClient.publish(("deepsync/" + String(DEVICE_ID) + "/data").c_str(), payload);
+    delay(100);
+  }
+  bufferIndex = 0;
+  Serial.println("[BUFFER] Flushed");
+}
+
+void blinkError() {
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(LED_RED, HIGH); delay(200);
+    digitalWrite(LED_RED, LOW); delay(200);
+  }
+}

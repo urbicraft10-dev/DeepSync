@@ -1,0 +1,239 @@
+"""
+Main API routers:
+  /api/projects  - multi-project CRUD
+  /api/sensors   - sensor management
+  /api/translate - translation service
+  /api/reports   - PDF report generation
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db, get_influx_client, project_bucket
+from app.core.security import get_current_user
+from app.models.project import User, Project, ProjectStatus
+from app.models.sensor import Sensor, SensorKind, SensorProtocol
+from app.models.alert import AlertConfig, AlertHistory, AlertSeverity, AlertStatus
+from app.models.measurement import TerraResult
+from app.services.calculation import analyser
+from app.services.alert_service import dispatch
+
+# ============================================================
+# Projects Router
+# ============================================================
+projects_router = APIRouter(prefix="/projects", tags=["Projects"])
+
+async def _owned_project(project_id: int, user: User, db: AsyncSession) -> Project:
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == user.id)
+    )
+    p = result.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return p
+
+# ============================================================
+# Schemas
+# ============================================================
+class ProjectIn(BaseModel):
+    name: str
+    description: str = ""
+    location_name: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class ProjectOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    location_name: str
+    latitude: Optional[float]
+    longitude: Optional[float]
+    status: ProjectStatus
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class SensorIn(BaseModel):
+    name: str
+    kind: SensorKind
+    protocol: SensorProtocol = SensorProtocol.simulated
+    serial_number: Optional[str] = None
+    location_description: str = ""
+    depth_m: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    calibration_factor: float = 1.0
+    calibration_offset: float = 0.0
+    connection_config: dict = {}
+    threshold_warning: Optional[float] = None
+    threshold_critical: Optional[float] = None
+    unit: str = "mm"
+    sf_final: float = 200.0  # من DeepSight
+
+class SensorOut(BaseModel):
+    id: int
+    name: str
+    kind: SensorKind
+    protocol: SensorProtocol
+    is_active: bool
+    unit: str
+    depth_m: Optional[float]
+    threshold_warning: Optional[float]
+    threshold_critical: Optional[float]
+    last_seen: Optional[datetime]
+    sf_final: float
+    
+    class Config:
+        from_attributes = True
+
+class AnalyseIn(BaseModel):
+    sensor_id: int = 0
+    s_measured: float
+    sh_mm: float = 0.0  # من DeepSight
+    piezo_kPa: float = 0.0  # من DeepSight
+    delta: float
+    s_residual: float = 0.0
+    s_final: float = 1.0
+    timestamp: Optional[datetime] = None
+
+# ============================================================
+# Endpoints
+# ============================================================
+@projects_router.get("", response_model=List[ProjectOut])
+async def list_projects(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    result = await db.execute(
+        select(Project).where(Project.owner_id == user.id).order_by(Project.created_at.desc())
+    )
+    return result.scalars().all()
+
+@projects_router.post("", response_model=ProjectOut, status_code=201)
+async def create_project(body: ProjectIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    project = Project(**body.model_dump(), owner_id=user.id)
+    db.add(project)
+    await db.flush()
+    db.add(AlertConfig(project_id=project.id))
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+@projects_router.get("/{project_id}", response_model=ProjectOut)
+async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return await _owned_project(project_id, user, db)
+
+@projects_router.get("/{project_id}/sensors", response_model=List[SensorOut])
+async def list_sensors(project_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _owned_project(project_id, user, db)
+    result = await db.execute(select(Sensor).where(Sensor.project_id == project_id))
+    return result.scalars().all()
+
+@projects_router.post("/{project_id}/sensors", response_model=SensorOut, status_code=201)
+async def create_sensor(project_id: int, body: SensorIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await _owned_project(project_id, user, db)
+    sensor = Sensor(**body.model_dump(), project_id=project_id)
+    db.add(sensor)
+    await db.commit()
+    await db.refresh(sensor)
+    return sensor
+
+@projects_router.post("/{project_id}/analyse")
+async def analyse(project_id: int, body: AnalyseIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    project = await _owned_project(project_id, user, db)
+    
+    cfg_result = await db.execute(select(AlertConfig).where(AlertConfig.project_id == project_id))
+    cfg = cfg_result.scalar_one_or_none()
+    
+    # حساب المعادلة (من المشروعين)
+    result = analyser.analyse(
+        project_id=project_id,
+        sensor_id=body.sensor_id,
+        s_measured=body.s_measured,
+        sh_mm=body.sh_mm,
+        piezo_kPa=body.piezo_kPa,
+        delta=body.delta,
+        timestamp=body.timestamp,
+        s_residual=body.s_residual,
+        s_final=body.s_final,
+        consecutive_threshold=cfg.danger_consecutive if cfg else 2,
+        rate_threshold=cfg.warning_rate_mm_h if cfg else 5.0,
+    )
+    
+    # تحديث حالة المشروع
+    status_map = {"safe": ProjectStatus.active, "warning": ProjectStatus.warning, 
+                  "danger": ProjectStatus.critical, "critical": ProjectStatus.critical}
+    project.status = status_map.get(result.state, ProjectStatus.active)
+    
+    # إرسال إنذارات
+    if result.alert_triggered and cfg:
+        await dispatch(
+            result,
+            email_recipients=cfg.email_recipients or [],
+            phone_numbers=cfg.phone_numbers or [],
+            fcm_tokens=cfg.fcm_tokens or [],
+            sms_provider=cfg.sms_provider,
+            enable_sms=cfg.enable_sms,
+            enable_email=cfg.enable_email,
+            enable_push=cfg.enable_push,
+        )
+        
+        sev_map = {"danger": AlertSeverity.danger, "critical": AlertSeverity.critical, 
+                   "warning": AlertSeverity.warning}
+        if result.state in sev_map:
+            db.add(AlertHistory(
+                project_id=project_id,
+                sensor_id=body.sensor_id or None,
+                severity=sev_map[result.state],
+                title=f"{result.state.upper()} – {project.name}",
+                message=result.message,
+                measured_value=result.s_measured,
+                reference_value=result.s_ref,
+                channels_notified=result.alert_channels,
+            ))
+    
+    await db.commit()
+    
+    # بث عبر WebSocket
+    try:
+        from app.api.websocket import manager
+        await manager.broadcast(project_id, {
+            "type": "stability",
+            "project_id": project_id,
+            "state": result.state,
+            "s_measured": result.s_measured,
+            "sh_mm": result.sh_mm,
+            "s_ref": result.s_ref,
+            "ratio": result.ratio,
+            "rate": result.delta_s_per_hour,
+            "u_percent": result.u_percent,
+            "timestamp": result.timestamp.isoformat(),
+        })
+    except Exception:
+        pass
+    
+    return {
+        "timestamp": result.timestamp.isoformat(),
+        "project_id": result.project_id,
+        "sensor_id": result.sensor_id,
+        "s_measured": result.s_measured,
+        "sh_mm": result.sh_mm,
+        "piezo_kPa": result.piezo_kPa,
+        "delta": result.delta,
+        "ratio": result.ratio,
+        "s_ref": result.s_ref,
+        "uniformity_degree": result.uniformity_degree,
+        "delta_s_per_hour": result.delta_s_per_hour,
+        "state": result.state,
+        "u_percent": result.u_percent,
+        "consecutive_danger": result.consecutive_danger,
+        "alert_triggered": result.alert_triggered,
+        "alert_channels": result.alert_channels,
+        "message": result.message,
+    }

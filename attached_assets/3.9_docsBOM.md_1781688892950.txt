@@ -1,0 +1,25 @@
+# 📋 DeepSync - BOM (Bill of Materials)
+
+## Capteurs Géotechniques
+| Composant | Qté | Prix estimé |
+|-----------|-----|-------------|
+| LVDT Settlement Sensor (0-500mm) | 2 | 800-1500€/pièce |
+| ADXL345 (Inclinomètre) | 2 | 150-400€/pièce |
+| Piézomètre à corde vibrante | 1 | 600-1200€/pièce |
+| HX711 ADC | 2 | 3-8€/pièce |
+
+## Microcontrôleurs
+| Composant | Qté | Prix estimé |
+|-----------|-----|-------------|
+| ESP32-WROOM-32D | 3 | 8-15€/pièce |
+| Module RS485 MAX485 | 3 | 2-5€/pièce |
+| Module GSM SIM800L | 2 | 8-20€/pièce |
+
+## Alimentation
+| Composant | Qté | Prix estimé |
+|-----------|-----|-------------|
+| Panneau solaire 30W | 2 | 30-60€/pièce |
+| Batterie LiFePO4 12V 20Ah | 2 | 60-120€/pièce |
+| Régulateur MPPT 10A | 2 | 50-80€/pièce |
+
+## Total estimé: 4,000€ - 8,500€

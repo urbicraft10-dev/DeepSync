@@ -1,0 +1,5 @@
+# محول الحساسات
+class SensorAdapter:
+    async def read(self):
+        # قراءة الحساسات
+        pass

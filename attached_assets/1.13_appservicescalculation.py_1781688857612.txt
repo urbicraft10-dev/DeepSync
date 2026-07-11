@@ -1,0 +1,148 @@
+"""
+DeepSync Core Equation (Matsuoka-Kawamura 1977)
+s = 5.93 * exp(1.28*(δ/s)² - 3.41*(δ/s))
+"""
+from __future__ import annotations
+
+import math
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple
+
+from app.models.measurement import TerraResult
+
+logger = logging.getLogger(__name__)
+
+DANGER_RATE_MM_H = 5.0
+
+# ============================================================
+# Pure functions
+# ============================================================
+def compute_s_ref(delta: float, s: float) -> Tuple[float, float]:
+    if s == 0:
+        return 0.0, 0.0
+    ratio = delta / s
+    s_ref = 5.93 * math.exp(1.28 * ratio ** 2 - 3.41 * ratio)
+    return round(ratio, 6), round(s_ref, 4)
+
+def compute_uniformity(s_residual: float, s_final: float) -> float:
+    if s_final == 0:
+        return 0.0
+    return round(min(max(s_residual / s_final * 100.0, 0.0), 100.0), 2)
+
+def compute_rate(readings: list) -> float:
+    if len(readings) < 2:
+        return 0.0
+    r1, r2 = readings[-2], readings[-1]
+    dt_h = (r2.timestamp - r1.timestamp).total_seconds() / 3600.0
+    if dt_h <= 0:
+        return 0.0
+    return round(abs(r2.s_measured - r1.s_measured) / dt_h, 4)
+
+def classify(s_measured: float, s_ref: float, rate: float, 
+             sh_mm: float = 0.0, danger_rate_threshold: float = DANGER_RATE_MM_H) -> str:
+    # Critère 1: Danger (s > s_ref)
+    if s_measured > s_ref:
+        return "danger"
+    # Critère 2: Critical (sh > 20mm)
+    if sh_mm > 20.0:
+        return "critical"
+    # Critère 3: Warning (rate > threshold)
+    if rate > danger_rate_threshold:
+        return "warning"
+    # Sinon: Safe
+    return "safe"
+
+# ============================================================
+# Stateful Analyser
+# ============================================================
+@dataclass
+class _Reading:
+    timestamp: datetime
+    s_measured: float
+
+class TerraSyncAnalyser:
+    def __init__(self):
+        self._consecutive: dict[int, int] = {}
+        self._history: dict[int, List[_Reading]] = {}
+    
+    def _push(self, project_id: int, reading: _Reading):
+        self._history.setdefault(project_id, []).append(reading)
+        self._history[project_id] = self._history[project_id][-120:]
+    
+    def analyse(
+        self,
+        project_id: int,
+        sensor_id: int,
+        s_measured: float,
+        sh_mm: float = 0.0,
+        piezo_kPa: float = 0.0,
+        delta: float = 0.0,
+        timestamp: Optional[datetime] = None,
+        s_residual: float = 0.0,
+        s_final: float = 1.0,
+        consecutive_threshold: int = 2,
+        rate_threshold: float = DANGER_RATE_MM_H,
+    ) -> TerraResult:
+        ts = timestamp or datetime.now(timezone.utc)
+        self._push(project_id, _Reading(ts, s_measured))
+        
+        ratio, s_ref = compute_s_ref(delta, s_measured)
+        u = compute_uniformity(s_residual, s_final)
+        rate = compute_rate(self._history[project_id])
+        state = classify(s_measured, s_ref, rate, sh_mm, rate_threshold)
+        
+        if state == "danger" or state == "critical":
+            self._consecutive[project_id] = self._consecutive.get(project_id, 0) + 1
+        else:
+            self._consecutive[project_id] = 0
+        
+        consec = self._consecutive[project_id]
+        triggered = (state in ["danger", "critical"] and consec >= consecutive_threshold) or state == "warning"
+        
+        channels = []
+        if state in ["danger", "critical"] and consec >= consecutive_threshold:
+            channels = ["sms", "email", "push"]
+        elif state == "warning":
+            channels = ["email", "push"]
+        
+        msg = _build_message(state, s_measured, sh_mm, piezo_kPa, s_ref, ratio, rate, consec)
+        
+        logger.info(
+            f"[DeepSync] project={project_id} sensor={sensor_id} "
+            f"s={s_measured:.2f} sh={sh_mm:.2f} s_ref={s_ref:.2f} "
+            f"ratio={ratio:.4f} rate={rate:.2f} state={state} consec={consec}"
+        )
+        
+        return TerraResult(
+            timestamp=ts,
+            project_id=project_id,
+            sensor_id=sensor_id,
+            s_measured=s_measured,
+            delta=delta,
+            ratio=ratio,
+            s_ref=s_ref,
+            uniformity_degree=u,
+            delta_s_per_hour=rate,
+            state=state,
+            consecutive_danger=consec,
+            alert_triggered=triggered,
+            alert_channels=channels,
+            message=msg,
+            sh_mm=sh_mm,
+            piezo_kPa=piezo_kPa,
+            u_percent=u,
+            distance_pct=((s_ref - s_measured) / s_ref * 100) if s_ref > 0 else 100,
+        )
+
+def _build_message(state, s_measured, sh_mm, piezo, s_ref, ratio, rate, consec):
+    if state == "danger":
+        return f"DANGER: s={s_measured:.2f}mm > s_ref={s_ref:.2f}mm (ratio={ratio:.4f}, consec={consec})"
+    if state == "critical":
+        return f"CRITICAL: sh={sh_mm:.2f}mm > 20mm threshold. s={s_measured:.2f}mm"
+    if state == "warning":
+        return f"WARNING: rate={rate:.2f}mm/h > 5mm/h. s={s_measured:.2f}mm, s_ref={s_ref:.2f}mm"
+    return f"SAFE: s={s_measured:.2f}mm < s_ref={s_ref:.2f}mm (rate={rate:.2f}mm/h)"
+
+analyser = TerraSyncAnalyser()

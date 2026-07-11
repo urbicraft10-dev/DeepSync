@@ -1,0 +1,120 @@
+// ============================================================
+// App.jsx - Application principale
+// ============================================================
+import React, { useState } from 'react';
+import DeepSyncDashboard from './components/dashboard/DeepSyncDashboard';
+import AlertPanel from './components/alerts/AlertPanel';
+import SettingsPanel from './components/settings/SettingsPanel';
+import ReportDownloader from './components/reports/ReportDownloader';
+import TranslatePanel from './components/translation/TranslatePanel';
+import './i18n';
+
+function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [deviceId, setDeviceId] = useState('NODE_01');
+  const [projectId, setProjectId] = useState('PROJ_001');
+
+  const tabs = [
+    { id: 'dashboard', label: '📊 Dashboard' },
+    { id: 'alerts', label: '🚨 Alertes' },
+    { id: 'settings', label: '⚙️ Paramètres' },
+    { id: 'reports', label: '📄 Rapports' },
+    { id: 'translate', label: '🌍 Traduction' },
+  ];
+
+  return (
+    <div style={{ background: '#F5F7FA', minHeight: '100vh' }}>
+      {/* Header */}
+      <header style={{
+        background: '#1F4E79',
+        color: '#fff',
+        padding: '16px 32px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <h1 style={{ margin: 0, fontSize: '24px' }}>🏗️ DeepSync</h1>
+          <span style={{ fontSize: '14px', opacity: 0.7 }}>v1.0.0</span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            type="text"
+            value={deviceId}
+            onChange={(e) => setDeviceId(e.target.value)}
+            placeholder="Device ID"
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '14px'
+            }}
+          />
+          <input
+            type="text"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            placeholder="Project ID"
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '14px'
+            }}
+          />
+        </div>
+      </header>
+
+      {/* Navigation */}
+      <nav style={{
+        background: '#fff',
+        padding: '0 32px',
+        display: 'flex',
+        gap: '4px',
+        borderBottom: '1px solid #E5E7EB',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '14px 20px',
+              border: 'none',
+              background: 'transparent',
+              color: activeTab === tab.id ? '#1F4E79' : '#6B7280',
+              fontWeight: activeTab === tab.id ? '600' : '400',
+              borderBottom: activeTab === tab.id ? '3px solid #1F4E79' : '3px solid transparent',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              fontSize: '15px'
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Contenu */}
+      <main style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+        {activeTab === 'dashboard' && (
+          <DeepSyncDashboard deviceId={deviceId} projectId={projectId} />
+        )}
+        {activeTab === 'alerts' && (
+          <AlertPanel projectId={projectId} />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsPanel projectId={projectId} />
+        )}
+        {activeTab === 'reports' && (
+          <ReportDownloader projectId={projectId} />
+        )}
+        {activeTab === 'translate' && (
+          <TranslatePanel />
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default App;

@@ -1,0 +1,55 @@
+"""
+MQTT API Endpoints
+POST /api/mqtt/publish
+POST /api/mqtt/subscribe
+GET  /api/mqtt/status
+"""
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+
+from app.core.security import get_current_user
+from app.models.project import User
+from app.mqtt.mqtt_handler import MQTTHandler
+
+router = APIRouter(prefix="/mqtt", tags=["MQTT"])
+
+class PublishIn(BaseModel):
+    topic: str
+    payload: dict
+    qos: int = 1
+
+class SubscribeIn(BaseModel):
+    topic: str
+    qos: int = 1
+
+# ============================================================
+# MQTT Handler Singleton
+# ============================================================
+_mqtt_handler = None
+
+def get_mqtt_handler():
+    global _mqtt_handler
+    if _mqtt_handler is None:
+        _mqtt_handler = MQTTHandler()
+    return _mqtt_handler
+
+# ============================================================
+# Endpoints
+# ============================================================
+@router.post("/publish")
+async def mqtt_publish(body: PublishIn, user: User = Depends(get_current_user)):
+    handler = get_mqtt_handler()
+    handler.publish(body.topic, body.payload, qos=body.qos)
+    return {"status": "published", "topic": body.topic}
+
+@router.post("/subscribe")
+async def mqtt_subscribe(body: SubscribeIn, user: User = Depends(get_current_user)):
+    handler = get_mqtt_handler()
+    handler.subscribe(body.topic, qos=body.qos)
+    return {"status": "subscribed", "topic": body.topic}
+
+@router.get("/status")
+async def mqtt_status(user: User = Depends(get_current_user)):
+    handler = get_mqtt_handler()
+    return {"connected": handler.is_connected()}

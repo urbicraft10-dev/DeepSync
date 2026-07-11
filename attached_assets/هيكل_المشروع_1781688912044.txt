@@ -1,0 +1,82 @@
+DeepSync-Platform/
+├── backend/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   └── security.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── project.py
+│   │   │   ├── sensor.py
+│   │   │   ├── alert.py
+│   │   │   └── measurement.py
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py
+│   │   │   ├── routes.py
+│   │   │   ├── mqtt.py
+│   │   │   └── websocket.py
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   ├── calculation.py
+│   │   │   ├── alert_service.py
+│   │   │   ├── sensor_adapter.py
+│   │   │   ├── translation.py
+│   │   │   └── pdf_report.py
+│   │   ├── workers/
+│   │   │   ├── __init__.py
+│   │   │   └── scheduler.py
+│   │   └── mqtt/
+│   │       ├── __init__.py
+│   │       └── mqtt_handler.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── firmware/
+│   ├── esp32_wifi/
+│   │   └── firmware.ino
+│   └── esp32_gprs/
+│       └── firmware_gprs.ino
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── dashboard/
+│   │   │   │   ├── DeepSyncDashboard.jsx
+│   │   │   │   ├── StabilityChart.jsx
+│   │   │   │   ├── VerticalChart.jsx
+│   │   │   │   └── HorizontalChart.jsx
+│   │   │   ├── alerts/
+│   │   │   │   └── AlertPanel.jsx
+│   │   │   ├── settings/
+│   │   │   │   └── SettingsPanel.jsx
+│   │   │   ├── reports/
+│   │   │   │   └── ReportDownloader.jsx
+│   │   │   └── translation/
+│   │   │       └── TranslatePanel.jsx
+│   │   ├── hooks/
+│   │   │   ├── useWebSocket.js
+│   │   │   └── useRealtimeData.js
+│   │   ├── services/
+│   │   │   ├── api.js
+│   │   │   └── mqtt.js
+│   │   ├── i18n/
+│   │   │   ├── locales/
+│   │   │   │   ├── ar.json
+│   │   │   │   ├── fr.json
+│   │   │   │   └── en.json
+│   │   │   └── index.js
+│   │   ├── App.jsx
+│   │   └── index.js
+│   ├── package.json
+│   └── Dockerfile
+├── docker/
+│   ├── docker-compose.yml
+│   └── mosquitto/
+│       └── mosquitto.conf
+└── docs/
+    ├── BOM.md
+    ├── DEPLOYMENT.md
+    └── API.md

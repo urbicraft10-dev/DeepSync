@@ -1,0 +1,64 @@
+import enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Float, ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+
+# ============================================================
+# أدوار المستخدمين
+# ============================================================
+class UserRole(str, enum.Enum):
+    admin = "admin"
+    engineer = "engineer"
+    viewer = "viewer"
+
+# ============================================================
+# نموذج المستخدم
+# ============================================================
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    role = Column(Enum(UserRole), default=UserRole.engineer)
+    language = Column(String, default="ar")  # ar | fr | en
+    is_active = Column(Boolean, default=True)
+    totp_secret = Column(String, nullable=True)
+    totp_enabled = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
+
+# ============================================================
+# حالة المشروع
+# ============================================================
+class ProjectStatus(str, enum.Enum):
+    active = "active"
+    warning = "warning"
+    critical = "critical"
+    inactive = "inactive"
+
+# ============================================================
+# نموذج المشروع
+# ============================================================
+class Project(Base):
+    __tablename__ = "projects"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, default="")
+    location_name = Column(String, default="")
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    status = Column(Enum(ProjectStatus), default=ProjectStatus.active)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    owner = relationship("User", back_populates="projects")
+    sensors = relationship("Sensor", back_populates="project", cascade="all, delete-orphan")
+    alert_config = relationship("AlertConfig", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    alerts = relationship("AlertHistory", back_populates="project", cascade="all, delete-orphan")

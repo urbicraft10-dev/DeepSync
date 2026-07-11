@@ -1,0 +1,8 @@
+# Construire et lancer tous les services
+docker-compose up -d
+
+# Voir les logs
+docker-compose logs -f backend
+
+# Arrêter
+docker-compose down

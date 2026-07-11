@@ -1,0 +1,55 @@
+import enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Float, ForeignKey, JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+
+class AlertSeverity(str, enum.Enum):
+    info = "info"
+    warning = "warning"
+    danger = "danger"
+    critical = "critical"  # من DeepSight
+
+class AlertStatus(str, enum.Enum):
+    active = "active"
+    acknowledged = "acknowledged"
+    resolved = "resolved"
+
+class AlertConfig(Base):
+    __tablename__ = "alert_configs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), unique=True, nullable=False)
+    email_recipients = Column(JSON, default=list)
+    phone_numbers = Column(JSON, default=list)
+    fcm_tokens = Column(JSON, default=list)
+    sms_provider = Column(String, default="twilio")
+    danger_consecutive = Column(Integer, default=2)
+    warning_rate_mm_h = Column(Float, default=5.0)
+    enable_sms = Column(Boolean, default=True)
+    enable_email = Column(Boolean, default=True)
+    enable_push = Column(Boolean, default=True)
+    cooldown_minutes = Column(Integer, default=10)  # من DeepSight
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    project = relationship("Project", back_populates="alert_config")
+
+class AlertHistory(Base):
+    __tablename__ = "alert_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    sensor_id = Column(Integer, ForeignKey("sensors.id", ondelete="SET NULL"), nullable=True)
+    severity = Column(Enum(AlertSeverity), nullable=False)
+    status = Column(Enum(AlertStatus), default=AlertStatus.active)
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    measured_value = Column(Float, nullable=True)
+    reference_value = Column(Float, nullable=True)
+    channels_notified = Column(JSON, default=list)
+    acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    project = relationship("Project", back_populates="alerts")

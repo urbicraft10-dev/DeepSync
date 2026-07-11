@@ -1,0 +1,177 @@
+# ============================================================
+# DeepSync Platform - Docker Compose
+# ============================================================
+version: '3.8'
+
+services:
+  # ============================================================
+  # PostgreSQL (de TerraSync)
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: deepsync_postgres
+    environment:
+      POSTGRES_DB: deepsync
+      POSTGRES_USER: deepsync
+      POSTGRES_PASSWORD: deepsync_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepsync"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # InfluxDB (des deux projets)
+  # ============================================================
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: deepsync_influxdb
+    ports:
+      - "127.0.0.1:8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: deepsync_influx
+      DOCKER_INFLUXDB_INIT_ORG: deepsync
+      DOCKER_INFLUXDB_INIT_BUCKET: measurements
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: deepsync-influx-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Redis (de TerraSync)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: deepsync_redis
+    command: redis-server --requirepass deepsync_redis_pass --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "deepsync_redis_pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Mosquitto MQTT Broker (de DeepSight)
+  # ============================================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: deepsync_mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    restart: always
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Backend FastAPI (MERGÉ)
+  # ============================================================
+  backend:
+    build: ./backend
+    container_name: deepsync_backend
+    ports:
+      - "8000:8000"
+    env_file: ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Celery Worker (de TerraSync)
+  # ============================================================
+  celery_worker:
+    build: ./backend
+    container_name: deepsync_celery
+    command: celery -A app.workers.scheduler.celery_app worker --loglevel=info
+    env_file: ./backend/.env
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Celery Beat (de TerraSync)
+  # ============================================================
+  celery_beat:
+    build: ./backend
+    container_name: deepsync_beat
+    command: celery -A app.workers.scheduler.celery_app beat --loglevel=info
+    env_file: ./backend/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Frontend React
+  # ============================================================
+  frontend:
+    build: ./frontend
+    container_name: deepsync_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - deepsync_network
+
+  # ============================================================
+  # Grafana (de DeepSight)
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: deepsync_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=deepsync
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+    networks:
+      - deepsync_network
+
+networks:
+  deepsync_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  influxdb_data:
+  redis_data:
+  grafana_data:

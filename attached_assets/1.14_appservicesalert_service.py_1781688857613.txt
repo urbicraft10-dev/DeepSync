@@ -1,0 +1,213 @@
+"""
+Multi-channel alert dispatcher
+SMS : Twilio | Ooredoo | Djezzy | Mobilis
+Email: SMTP (HTML)
+Push : Firebase Cloud Messaging (FCM)
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import List, Optional
+
+import httpx
+
+from app.core.config import settings
+from app.models.measurement import TerraResult
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# SMS Providers (من TerraSync)
+# ============================================================
+async def _twilio(phones: List[str], body: str) -> bool:
+    if not settings.TWILIO_ACCOUNT_SID:
+        logger.warning("Twilio not configured")
+        return False
+    try:
+        from twilio.rest import Client
+        c = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        for p in phones:
+            c.messages.create(body=f"[DeepSync] {body}", from_=settings.TWILIO_PHONE_FROM, to=p)
+        logger.info(f"Twilio SMS sent to {phones}")
+        return True
+    except Exception as e:
+        logger.error(f"Twilio error: {e}")
+        return False
+
+async def _ooredoo(phones: List[str], body: str) -> bool:
+    if not settings.OOREDOO_API_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            for p in phones:
+                await c.post(settings.OOREDOO_API_URL, json={
+                    "username": settings.OOREDOO_USERNAME,
+                    "password": settings.OOREDOO_PASSWORD,
+                    "sender": settings.OOREDOO_SENDER,
+                    "to": p, "text": f"[DeepSync] {body}",
+                })
+        return True
+    except Exception as e:
+        logger.error(f"Ooredoo error: {e}")
+        return False
+
+async def _djezzy(phones: List[str], body: str) -> bool:
+    if not settings.DJEZZY_API_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            for p in phones:
+                await c.post(settings.DJEZZY_API_URL,
+                    json={"sender": settings.DJEZZY_SENDER, "recipient": p,
+                          "message": f"[DeepSync] {body}"},
+                    headers={"Authorization": f"Bearer {settings.DJEZZY_API_KEY}"})
+        return True
+    except Exception as e:
+        logger.error(f"Djezzy error: {e}")
+        return False
+
+async def _mobilis(phones: List[str], body: str) -> bool:
+    if not settings.MOBILIS_API_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            for p in phones:
+                await c.post(settings.MOBILIS_API_URL,
+                    json={"from": settings.MOBILIS_SENDER, "to": p,
+                          "text": f"[DeepSync] {body}"},
+                    headers={"X-API-Key": settings.MOBILIS_API_KEY})
+        return True
+    except Exception as e:
+        logger.error(f"Mobilis error: {e}")
+        return False
+
+_SMS_PROVIDERS = {
+    "twilio": _twilio,
+    "ooredoo": _ooredoo,
+    "djezzy": _djezzy,
+    "mobilis": _mobilis,
+}
+
+async def send_sms(phones: List[str], body: str, provider: str = "twilio") -> bool:
+    fn = _SMS_PROVIDERS.get(provider, _twilio)
+    ok = await fn(phones, body)
+    if not ok and provider != "twilio":
+        logger.info("Falling back to Twilio for SMS")
+        ok = await _twilio(phones, body)
+    return ok
+
+# ============================================================
+# Email
+# ============================================================
+async def send_email(recipients: List[str], subject: str, body: str, state: str = "safe") -> bool:
+    if not settings.SMTP_USER:
+        logger.warning("SMTP not configured")
+        return False
+    
+    colors = {"danger": "#D32F2F", "critical": "#D32F2F", "warning": "#F57C00", "safe": "#388E3C"}
+    icons = {"danger": "🔴", "critical": "🔴", "warning": "🟡", "safe": "🟢"}
+    color = colors.get(state, "#1565C0")
+    icon = icons.get(state, "ℹ️")
+    
+    html = f"""
+    <html><body style="font-family:Arial;background:#f5f5f5;padding:20px">
+      <div style="max-width:600px;margin:auto;background:#fff;border-radius:10px;
+                  box-shadow:0 2px 8px rgba(0,0,0,.15);overflow:hidden">
+        <div style="background:{color};padding:20px;color:#fff">
+          <h2 style="margin:0">{icon} DeepSync – {state.upper()}</h2>
+        </div>
+        <div style="padding:24px">
+          <p style="font-size:15px;line-height:1.6">{body}</p>
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0"/>
+          <small style="color:#888">DeepSync Geotechnical Monitoring Platform</small>
+        </div>
+      </div>
+    </body></html>"""
+    
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[DeepSync] {icon} {state.upper()} – {subject}"
+        msg["From"] = settings.SMTP_USER
+        msg["To"] = ", ".join(recipients)
+        msg.attach(MIMEText(body, "plain"))
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            srv.sendmail(settings.SMTP_USER, recipients, msg.as_string())
+        logger.info(f"Email sent to {recipients}")
+        return True
+    except Exception as e:
+        logger.error(f"Email error: {e}")
+        return False
+
+# ============================================================
+# Push (FCM)
+# ============================================================
+async def send_push(tokens: List[str], title: str, body: str, data: Optional[dict] = None) -> bool:
+    if not settings.FCM_SERVER_KEY:
+        logger.warning("FCM not configured")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            for token in tokens:
+                payload = {
+                    "to": token,
+                    "notification": {"title": title, "body": body},
+                    "priority": "high",
+                }
+                if data:
+                    payload["data"] = data
+                await c.post("https://fcm.googleapis.com/fcm/send",
+                           json=payload,
+                           headers={"Authorization": f"key={settings.FCM_SERVER_KEY}"})
+        logger.info(f"FCM push sent to {len(tokens)} token(s)")
+        return True
+    except Exception as e:
+        logger.error(f"FCM error: {e}")
+        return False
+
+# ============================================================
+# Unified dispatcher
+# ============================================================
+async def dispatch(
+    result: TerraResult,
+    email_recipients: List[str],
+    phone_numbers: List[str],
+    fcm_tokens: List[str],
+    sms_provider: str = "twilio",
+    enable_sms: bool = True,
+    enable_email: bool = True,
+    enable_push: bool = True,
+) -> dict:
+    if not result.alert_triggered:
+        return {"dispatched": False, "state": result.state}
+    
+    subject = f"Project {result.project_id} – Sensor {result.sensor_id}"
+    body = result.message
+    tasks = []
+    
+    if enable_sms and "sms" in result.alert_channels and phone_numbers:
+        tasks.append(("sms", send_sms(phone_numbers, body, sms_provider)))
+    if enable_email and "email" in result.alert_channels and email_recipients:
+        tasks.append(("email", send_email(email_recipients, subject, body, result.state)))
+    if enable_push and "push" in result.alert_channels and fcm_tokens:
+        tasks.append(("push", send_push(
+            fcm_tokens,
+            title=f"DeepSync {result.state.upper()}",
+            body=body,
+            data={"project_id": str(result.project_id), "state": result.state},
+        )))
+    
+    out = {"dispatched": bool(tasks), "state": result.state, "channels": {}}
+    if tasks:
+        names, coros = zip(*tasks)
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for name, res in zip(names, results):
+            out["channels"][name] = res if not isinstance(res, Exception) else str(res)
+    return out
