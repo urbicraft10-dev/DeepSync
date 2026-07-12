@@ -9,7 +9,7 @@ const app: Express = express();
 console.log(process.env.FRONTEND_URL);
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: true,
   credentials: true,  
   optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 }));
