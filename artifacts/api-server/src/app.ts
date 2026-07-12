@@ -6,7 +6,14 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
-console.log(process.env.FRONTEND_URL);
+// console.log(process.env.FRONTEND_URL);
+
+app.use((req, res, next) => {
+  console.log("METHOD:", req.method);
+  console.log("URL:", req.url);
+  console.log("ORIGIN:", req.headers.origin);
+  next();
+});
 
 app.use(cors({
   origin: true,
