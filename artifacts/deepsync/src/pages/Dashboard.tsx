@@ -288,6 +288,8 @@ export default function Dashboard({ deviceId = "SENSOR-01", projectId = "PROJECT
     physicsMetrics: {}
   });
 
+  const [sensorHistory, setSensorHistory] = useState<any[]>([]);
+
   // الـ Refs
 const prevRef = useRef(current);
 const lastAlertRef = useRef<number>(0);
@@ -335,7 +337,6 @@ const sceneRef = useRef<any>(null);
 
   useEffect(() => {
     if (isSystemFrozen) return;
-    const [sensorHistory, setSensorHistory] = useState<any[]>([]); // أضفه بعد تعريفات الـ State الأخرى
     const interval = setInterval(() => {
       const reading = simulatePhysicsReading(prevRef.current, projectType, isFakeSimulation);
       prevRef.current = reading;
