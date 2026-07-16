@@ -71,7 +71,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(255,255,255,0.15)", padding: "6px 12px", borderRadius: "8px", fontSize: "13px" }}>
             <span>👤</span>
             <div>
-              <div style={{ fontWeight: "700", fontSize: "13px" }}>{user.full_name.split(" ")[0]}</div>
+             <div style={{ fontWeight: "700", fontSize: "13px" }}>{user.full_name?.split(" ")?.[0] || "User"}</div>
               <div style={{ fontSize: "10px", opacity: 0.8 }}>{user.company_name}</div>
             </div>
             <span style={{ background: ROLE_COLORS[user.role], color: "#fff", padding: "2px 8px", borderRadius: "10px", fontSize: "10px", fontWeight: "bold" }}>
