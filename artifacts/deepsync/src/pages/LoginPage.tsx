@@ -30,15 +30,11 @@ export default function LoginPage({ onLogin }: Props) {
   const [loading, setLoading] = useState(false);
 
   // دالة تسجيل الدخول والربط مع السيرفر الخلفي
-  const handleLogin = async () => {
-    if (!email || !password) {
-      setError("Veuillez remplir tous les champs");
-      return;
-    }
-    setError('');
-    setLoading(true);
+ const handleLogin = async () => {
+    // ... الكود السابق
     try {
-      const response = await fetch('/api/auth/login', {
+      // ضع الرابط الكامل للخادم هنا بدلاً من /api/...
+      const response = await fetch('https://workspaceapi-server-production-4fc8.up.railway.app/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
