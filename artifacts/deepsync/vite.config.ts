@@ -37,7 +37,6 @@ export default defineConfig({
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
-      // هذا السطر هو الحل لمشكلتك
       "@/api-server": path.resolve(import.meta.dirname, "..", "..", "api-server", "src")
     },
     dedupe: ["react", "react-dom"],
@@ -55,10 +54,25 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    // هذا الجزء هو الحل لمشكلة الاتصال بين الواجهة والخادم
+    proxy: {
+      '/api': {
+        target: 'https://workspaceapi-server-production-4fc8.up.railway.app',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
   preview: {
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'https://workspaceapi-server-production-4fc8.up.railway.app',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });
