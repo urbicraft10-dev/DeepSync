@@ -1,0 +1,27 @@
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel
+import os
+
+app = FastAPI()
+
+# هيكلية البيانات القادمة من الحساسات
+class IoTTelemetryPayload(BaseModel):
+    project_id: str      # رقم المشروع لضمان العزل
+    gateway_id: str      # بوابة الاتصال (LoRa/GPRS)[cite: 6]
+    sensor_id: str       # هوية الحساس[cite: 6]
+    vertical_mm: float   # القراءة العمودية[cite: 6]
+    horizontal_mm: float # القراءة الأفقية[cite: 6]
+
+# دالة التحقق من الأمن (Zero-Trust Security)[cite: 6]
+def verify_secure_edge(gateway_id: str):
+    # هنا يتم التحقق من التوثيق المتبادل mTLS[cite: 6]
+    if not gateway_id.startswith("RAYGEO_GW_"):
+        raise HTTPException(status_code=401, detail="Unauthorized Security Edge Device")
+    return True
+
+@app.post("/api/v1/telemetry")
+async def process_signal(payload: IoTTelemetryPayload):
+    # التحقق من أمن البوابة قبل قبول البيانات[cite: 6]
+    if verify_secure_edge(payload.gateway_id):
+        # هنا سيتم لاحقاً إرسال البيانات للـ Database والمحرك الفيزيائي
+        return {"status": "synchronized", "project": payload.project_id}

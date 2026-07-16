@@ -37,6 +37,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      // هذا السطر هو الحل لمشكلتك
+      "@/api-server": path.resolve(import.meta.dirname, "..", "..", "api-server", "src")
     },
     dedupe: ["react", "react-dom"],
   },
