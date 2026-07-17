@@ -14,7 +14,7 @@
     "@types/three": "^0.185.1",
     "cross-env": "^10.1.0",
     "prettier": "^3.8.3",
-    "typescript": "^5.9.3"
+    "typescript": "~5.9.3"
   },
   "pnpm": {
     "overrides": {
