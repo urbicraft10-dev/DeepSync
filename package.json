@@ -4,13 +4,14 @@
   "license": "MIT",
   "packageManager": "pnpm@11.11.0",
   "scripts": {
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build": "pnpm --filter ./artifacts/deepsync run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {
     "@esbuild/win32-x64": "0.27.3",
+    "@types/three": "^0.185.1",
     "cross-env": "^10.1.0",
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"
